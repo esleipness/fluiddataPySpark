@@ -1,0 +1,379 @@
+---
+title: "Bangladesh Weather"
+author: "Emily Sleipness"
+date: "2023-12-22"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+install.packages("readxl")
+library(readxl)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+Bweather = read_xlsx("C:/Users/eslei/OneDrive/Documents/BangladeshWeatherXLSX.xlsx")
+```
+
+
+```{r}
+#complicated date datapoint, install and use lubridate
+#install.packages("lubridate")
+library(lubridate)
+```
+```{r}
+Bweather$Date <- ymd_hms(Bweather$Date)
+```
+
+```{r}
+sum(is.na(Bweather$Date))
+```
+```{r}
+Bweather$Date
+```
+
+
+```{r}
+#datacleaning: fix the date and format it to y/m/d due to the difficulty of converting this type of date structure
+
+Bweather$Date <- as.POSIXct(sub(" \\+\\d{2}$", "", Bweather$Date), format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+
+# Check the structure of the resulting Date column
+str(Bweather$Date)
+```
+```{r}
+#determine the range of the dates, study the variable names
+range(Bweather$Date)
+
+names(Bweather)
+```
+```{r}
+#create a dataset for multiple regression studies on RAINSUMMM(amount of rain)
+
+MRInput <- Bweather[,c("Date","WSMAXMS","WSMAXKT","WSMAXKM", "TEMPMINDEG","TEMPMAXDEG", "RAINSUMMM")]
+
+wEATHERmodel1 <- lm(RAINSUMMM~Date+WSMAXMS+TEMPMINDEG+TEMPMAXDEG, data = MRInput)
+
+print(wEATHERmodel1)
+
+```
+
+```{r}
+library(xts)
+library(tsbox)
+
+# Convert Date column to POSIXct format with lubridate
+Bweather$Date <- ymd_hms(Bweather$Date, tz = "UTC")
+
+# Create an xts object with Date column in POSIXct format
+historical <- xts(Bweather[, c("TEMPMINDEG", "TEMPMAXDEG", "RAINSUMMM")], order.by = Bweather$Date)
+
+# Regularize the time series
+historical <- ts_regular(historical)
+
+# Fill missing values
+# Identify rows with NAs in the Date column
+rows_with_na <- which(is.na(index(historical)))
+
+# Extract the desired window
+historical <- window(historical, start = as.Date("2017-02-23"), end = as.Date("2020-05-08"))
+
+# Print unique dates
+print(unique(index(historical)))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+summary(historical)
+```
+```{r}
+#impute the mean for missing values
+
+#install.packages("imputeTS")
+library(imputeTS)
+
+historical <- na.mean(historical)
+
+summary(historical)
+```
+
+## Including Plots
+
+
+Time to start plotting.  Start with an imbedding plot, trend over time min and max temp.  
+
+```{r pressure, echo=FALSE}
+plot(ts_ts(historical$TEMPMAXDEG), col ="darkred", bty="n", las=1, fg = NA,
+     ylim=c(0, 60), ylab = "Temperature (C)")
+lines(ts_ts(historical$TEMPMINDEG), col = "navy")
+
+grid(nx=NA, ny=NULL, lty=1, col="gray")
+
+legend("topright", fill=c("darkred", "navy"), cex=0.7,
+	legend=c("TEMPMAXDEG", "TEMPMINDEG"), bg="white")
+```
+```{r}
+library(xts)
+
+historical$MONTH = format(index(historical), "%m")
+
+months = split(as.numeric(historical$TEMPMINDEG), historical$MONTH)
+
+sapply(months, summary)
+```
+
+```{r}
+months = split(as.numeric(historical$TEMPMAXDEG), historical$MONTH)
+
+sapply(months, summary)
+```
+
+
+
+
+
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+# use an animated GIF chart to show the rainfall by month:
+
+
+
+#install.packages("gapminder")
+#install.packages("ggplot2")
+#install.packages("gganimate")
+#install.packages("transformr")
+#install.packages("gifski")
+
+library(gapminder)
+library(ggplot2)
+library(gganimate)
+
+p <- ggplot(historical, aes(x = MONTH, y = RAINSUMMM)) +
+  geom_line(size = 1) +
+  labs(title = "Rain By Date",
+       subtitle = "For Forecastings",
+       x = "Date",
+       y = "Daily Rain in MM") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Animate the plot
+animated_plot <- p + transition_states(MONTH, transition_length = 2, state_length = 1) +
+  enter_fade() +
+  exit_fade()
+
+#anim_save("animated_time_series_plot.gif", animation = animate(animated_plot), #renderer = gifski_renderer())
+
+animate(animated_plot, duration = 5, fps = 20, width = 200, height = 200, renderer = gifski_renderer())
+anim_save("output.gif")
+
+# Save the animated plot as a gifanim_save("animated_time_series_plot.gif", renderer = gifski_renderer())
+```
+```{r}
+
+
+# Create a univariate time series object
+
+library(tsbox)
+decomposition = stl(ts_ts(historical$TEMPMAXDEG), s.window=365, t.window=7001)
+
+plot(decomposition)
+
+summary(decomposition$time.series[,"trend"])
+```
+```{r}
+decomposition = stl(ts_ts(historical$RAINSUMMM), s.window=365, t.window=7001)
+
+plot(decomposition)
+
+summary(decomposition$time.series[,"trend"])
+
+```
+```{r}
+library(forecast)
+
+training_data <- period.apply(historical$RAINSUMMM, seq(1, nrow(historical) - 1, 30.4375), max)
+
+# Create a time series object
+ts_training_data <- ts(training_data, frequency = 12)  # Assuming monthly data (30.4375 days)
+
+model_RAINSUMMM <- hw(ts_training_data, h = 60)  # Forecasting 60 periods ahead
+
+# Print the forecast summary
+summary(model_RAINSUMMM)
+```
+```{r}
+plot(model_RAINSUMMM, lwd=3, bty="n", las=1, fg=NA)
+
+grid(nx=NA, ny=NULL, lty=1)
+```
+```{r}
+training.data2 = ts_ts(historical$RAINSUMMM)
+
+parameters = auto.arima(training.data2)
+
+print(parameters)
+```
+
+```{r}
+arima.model = arima(training.data2, order = c(5,0,1), seasonal = list(order=c(0,1,0), period=365))
+
+arima.RAINSUMMM = forecast(arima.model, 1825)
+
+plot(arima.RAINSUMMM, lwd=3, bty="n", las=1, fg=NA, 
+	xlim=c(2018, 2026), ylab="Mean Monthly Rain Fall (C)")
+
+grid(nx=NA, ny=NULL, lty=1)
+
+```
+```{r}
+missing_dates <- historical$Date[is.na(historical$Date) | is.infinite(historical$Date)]
+print(missing_dates)
+```
+
+```{r}
+
+# Print unique dates
+print(unique(index(historical)))
+
+
+```
+
+```{r}
+# Set the option to disable timezone checking for xts objects
+options(xts_check_TZ = FALSE)
+
+# Now you can proceed with the rest of your code
+# ...
+
+# Convert Date column to POSIXct format with lubridate
+Bweather$Date <- ymd_hms(Bweather$Date, tz = "UTC")
+
+# Create an xts object with Date column in POSIXct format
+historical <- xts(Bweather[, c("TEMPMINDEG", "TEMPMAXDEG", "RAINSUMMM")], order.by = Bweather$Date)
+
+# Regularize the time series
+historical <- ts_regular(historical)
+
+# Fill missing values
+# Identify rows with NAs in the Date column
+rows_with_na <- which(is.na(index(historical)))
+
+# Extract the desired window
+historical <- window(historical, start = as.Date("2017-02-23"), end = as.Date("2020-05-08"))
+
+# Print unique dates
+print(unique(index(historical)))
+```
+```{r}
+# Verify the range of dates
+date_range <- range(historical$Date)
+
+# Check if date_range contains non-missing and finite values
+if (!any(is.na(date_range)) && all(is.finite(date_range))) {
+  # Generate forecast dates starting from the end of historical data
+  forecast_dates <- seq(max(date_range, na.rm = TRUE) + 1, length.out = 365, by = "days")
+  forecast_values <- forecast(model_arima, h = 365)$mean  # Assuming 'model_arima' is already defined
+
+  # Print the lengths
+  print(length(forecast_dates))
+  print(length(forecast_values))
+
+  # Create a data frame
+  forecast_data <- data.frame(
+    Date = forecast_dates,
+    ForecastedRainfall = forecast_values
+  )
+
+  # Print the first few rows of forecast_data to check its structure
+  print(head(forecast_data))
+
+  # Write forecasted data to Excel using a package like openxlsx
+  library(openxlsx)
+  write.xlsx(forecast_data, "forecast_results.xlsx")
+} else {
+  print("Cannot generate forecasts. Date range contains missing or non-finite values.")
+}
+```
+
+```{r}
+# Print the structure of the historical object
+str(historical)
+
+# Print the first few rows of the historical object
+head(historical)
+```
+
+
+```{r}
+model_arima <- auto.arima(ts(historical$RAINSUMMM, frequency = 365))
+print(model_arima)
+```
+
+
+
+
+
+```{r}
+
+#install.packages("openxlsx")
+library(openxlsx)
+# Set the option to disable timezone checking for xts objects
+options(xts_check_TZ = FALSE)
+
+# Generate forecast dates starting from the end of historical data
+date_range <- index(historical)
+if (!any(is.na(date_range)) && all(is.finite(date_range))) {
+  forecast_dates <- seq(max(date_range) + 1, length.out = 365, by = "days")
+  forecast_values <- forecast(model_arima, h = 365)$mean  # Assuming 'model_arima' is already defined
+
+  # Create a data frame
+  forecast_data <- data.frame(
+    Date = forecast_dates,
+    ForecastedRainfall = forecast_values
+  )
+
+  # Print the lengths
+  print(length(forecast_dates))
+  print(length(forecast_values))
+
+  # Print the first few rows of forecast_data to check its structure
+  print(head(forecast_data))
+
+  # Write forecasted data to Excel using a package like openxlsx
+  library(openxlsx)
+  write.xlsx(forecast_data, "forecast_results.xlsx")
+} else {
+  print("Cannot generate forecasts. Date range contains missing or non-finite values.")
+}
+```
+
+
+
+
+
+
